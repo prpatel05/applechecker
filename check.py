@@ -3,6 +3,8 @@ from __future__ import print_function
 import sys
 import time
 import json
+import boto3
+from botocore.config import Config
 from socket import gaierror
 try:
     # python 3
@@ -12,7 +14,6 @@ except ImportError:
     # python2
     from urllib import urlopen
     from urllib import urlencode
-from Alert import SmtpAlert
 
 # only tested for US stores
 URL = "http://www.apple.com/shop/retail/pickup-message"
@@ -26,10 +27,25 @@ INPUT_ERRORS = {"Products Invalid or not buyable",
 
 INITMSG = "{} Start monitoring {} inventory in area {}."
 
+my_config = Config(
+    region_name = 'us-east-1',
+    signature_version = 'v4',
+    retries = {
+        'max_attempts': 10,
+        'mode': 'standard'
+    }
+)
+CLIENT = boto3.client('sns', config=my_config)
+
+def publish_message(message):
+    CLIENT.publish(
+            TopicArn='arn:aws:sns:us-east-1:496355470162:apple-inventory',
+            Message=message,
+            )
+
 
 def main(model, zipcode, sec=5, *alert_params):
     good_stores = []
-    my_alert = SmtpAlert(*alert_params)
     params = {'parts.0': model,
               'location': zipcode}
     sec = int(sec)
@@ -52,7 +68,7 @@ def main(model, zipcode, sec=5, *alert_params):
             item = (stores[0]['partsAvailability']
                     [model]['storePickupProductTitle'])
             if init:
-                my_alert.send(INITMSG.format(
+                print(INITMSG.format(
                     time.strftime(DATEFMT), item, zipcode))
                 init = False
         except (ValueError, KeyError, gaierror) as reqe:
@@ -77,13 +93,13 @@ def main(model, zipcode, sec=5, *alert_params):
                     good_stores.append(sname)
                     msg = u"{} Found it! {} has {}! {}{}".format(
                         time.strftime(DATEFMT), sname, item, BUY, model)
-                    my_alert.send(msg)
+                    publish_message(msg)
             else:
                 if sname in good_stores:
                     good_stores.remove(sname)
                     msg = u"{} Oops all {} in {} are gone :( ".format(
                         time.strftime(DATEFMT), item, sname)
-                    my_alert.send(msg)
+                    publish_message(msg)
 
         if good_stores:
             print(u"{current} Still Avaiable: {stores}".format(
